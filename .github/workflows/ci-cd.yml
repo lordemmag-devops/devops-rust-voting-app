@@ -5,6 +5,9 @@ on:
     branches: [ master ]
 
 jobs:
+  # -----------------------------------------------------------------
+  # Backend – build Docker image and push to GitHub Container Registry
+  # -----------------------------------------------------------------
   build:
     runs-on: ubuntu-latest
     steps:
@@ -34,3 +37,39 @@ jobs:
           context: ./services/backend-rust
           push: true
           tags: ghcr.io/${{ github.repository_owner }}/devops-rust-voting-app-backend:${{ github.sha }}
+
+  # -----------------------------------------------------------------
+  # Front‑end – build React app and deploy to Vercel
+  # -----------------------------------------------------------------
+  deploy-frontend:
+    needs: build               # run after the backend build finishes
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'   # match the version used locally
+
+      - name: Install dependencies
+        run: |
+          cd services/frontend-react
+          npm ci               # clean install based on package-lock.json
+
+      - name: Build React app
+        run: |
+          cd services/frontend-react
+          npm run build        # creates production build in ./build
+
+      - name: Deploy to Vercel
+        uses: amondnet/vercel-action@v20
+        with:
+          vercel-token: ${{ secrets.VERCEL_TOKEN }}   # Vercel personal token
+          # Optional – specify org and project IDs if you have multiple projects
+          # vercel-org-id: ${{ secrets.VERCEL_ORG_ID }}
+          # vercel-project-id: ${{ secrets.VERCEL_PROJECT_ID }}
+          working-directory: services/frontend-react
+          args: '--prod'          # force a production deployment
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}

@@ -3,12 +3,34 @@ services:
   mongo:
     image: mongo:6
     restart: unless-stopped
-    ports: ["27017:27017"]
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo-data:/data/db
+    healthcheck:
+      test: ["CMD", "mongo", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   backend:
     build: ./services/backend-rust
+    restart: unless-stopped
     environment:
       - MONGO_URI=mongodb://mongo:27017
     ports:
       - "8080:8080"
     depends_on:
-      - mongo
+      mongo:
+        condition: service_healthy
+
+  frontend:
+    build: ./services/frontend-react
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+
+volumes:
+  mongo-data:

@@ -1,0 +1,1 @@
+/Users/admin/Documents/DevOps/HandsOn/devops-rust-voting-app/services/backend-rust/target/release/backend-rust: /Users/admin/Documents/DevOps/HandsOn/devops-rust-voting-app/services/backend-rust/src/main.rs

@@ -2,6 +2,8 @@ use axum::{
     extract::State,
     routing::{get, post},
     Json, Router,
+    response::IntoResponse, // Add IntoResponse for explicit return types
+    http::StatusCode, // Add StatusCode for error responses
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -9,6 +11,7 @@ use std::sync::Arc;
 use mongodb::{Client, Collection, bson::doc};
 use tracing_subscriber;
 use chrono; // Add chrono import
+use futures_util::stream::TryStreamExt; // Added for cursor.try_next()
 use axum_prometheus::PrometheusMetricLayer; // Fix Prometheus imports
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -60,23 +63,23 @@ async fn main() -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn handle_vote(State(state): State<Arc<AppState>>, Json(payload): Json<Vote>) -> Result<Json<serde_json::Value>, anyhow::Error> {
+async fn handle_vote(State(state): State<Arc<AppState>>, Json(payload): Json<Vote>) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     // insert vote
-    let vote_doc = mongodb::bson::to_document(&payload)?;
-    state.votes.insert_one(vote_doc, None).await?;
+    let vote_doc = mongodb::bson::to_document(&payload).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    state.votes.insert_one(vote_doc, None).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     // create block
-    let vote_json = serde_json::to_string(&payload)?;
+    let vote_json = serde_json::to_string(&payload).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let vote_hash = hex::encode(Sha256::digest(vote_json));
 
     // fetch last block
     let last_block_doc = state.blocks
         .find_one(None, mongodb::options::FindOneOptions::builder().sort(doc!{"index": -1}).build())
-        .await?;
+        .await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     let (prev_hash, index) = if let Some(doc) = last_block_doc {
-        let prev_hash = doc.get_str("hash")?.to_string();
-        let index = doc.get_i64("index")? + 1;
+        let prev_hash = doc.get_str("hash").map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?.to_string();
+        let index = doc.get_i64("index").map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))? + 1;
         (prev_hash, index)
     } else {
         ("0".to_string(), 0) // Genesis block
@@ -90,25 +93,25 @@ async fn handle_vote(State(state): State<Arc<AppState>>, Json(payload): Json<Vot
         hash: String::new(), // Will be calculated
     };
 
-    let serialized_for_hash = serde_json::to_string(&new_block)?;
+    let serialized_for_hash = serde_json::to_string(&new_block).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let block_hash = hex::encode(Sha256::digest(serialized_for_hash));
     new_block.hash = block_hash;
 
-    let to_insert = mongodb::bson::to_document(&new_block)?;
-    state.blocks.insert_one(to_insert, None).await?;
+    let to_insert = mongodb::bson::to_document(&new_block).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    state.blocks.insert_one(to_insert, None).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     Ok(Json(serde_json::json!({"ok": true})))
 }
 
-async fn handle_results(State(state): State<Arc<AppState>>) -> Result<Json<serde_json::Value>, anyhow::Error> {
+async fn handle_results(State(state): State<Arc<AppState>>) -> Result<Json<serde_json::Value>, (StatusCode, String)> {
     // naive aggregation
     let mut cursor = state.votes.aggregate(vec![
         doc! { "$group": { "_id": "$choice", "count": { "$sum": 1 } } }
-    ], None).await?;
+    ], None).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     let mut out = serde_json::Map::new();
-    while let Some(doc) = cursor.try_next().await? {
-        let k = doc.get_str("_id")?.to_string();
-        let v = doc.get_i32("count")?;
+    while let Some(doc) = cursor.try_next().await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))? {
+        let k = doc.get_str("_id").map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?.to_string();
+        let v = doc.get_i32("count").map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
         out.insert(k, serde_json::Value::from(v));
     }
     Ok(Json(serde_json::Value::Object(out)))

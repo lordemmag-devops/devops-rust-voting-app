@@ -1,0 +1,2 @@
+fn(axum::extract::State<Arc<AppState>>, Json<Vote>) -> impl futures_util::Future<Output = Result<Json<Value>, anyhow::Error>> {handle_vote}
+fn(axum::extract::State<Arc<AppState>>, Json<Vote>) -> impl futures_util::Future<Output = Result<Json<Value>, anyhow::Error>> {handle_vote}: Handler<_, _>
